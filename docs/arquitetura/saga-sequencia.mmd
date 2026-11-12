@@ -1,0 +1,57 @@
+sequenceDiagram
+    autonumber
+    actor A as Atendente
+    actor C as Cliente
+    participant OS as OS Service (orquestrador)
+    participant MQ as RabbitMQ
+    participant B as Billing
+    participant E as Execução
+
+    Note over MQ,E: As respostas do Billing e da Execução também passam pelo RabbitMQ<br/>(setas diretas só para legibilidade)
+    A->>OS: PATCH /ordens/{id}/solicitar-aprovacao
+    Note over OS: OS segue EM_DIAGNOSTICO (travada para alteração)<br/>Saga iniciada (outbox, mesma transação)
+    OS->>MQ: SolicitarOrcamento
+    MQ->>B: SolicitarOrcamento
+    alt orçamento gerado
+        B-->>OS: OrcamentoGerado
+        Note over OS: AGUARDANDO_APROVACAO
+    else sem resposta no prazo
+        OS->>MQ: reenvia o mesmo comando (até 3 envios)
+        Note over OS: esgotado: segue EM_DIAGNOSTICO, pode pedir de novo
+    end
+    alt cliente aprova
+        C->>OS: PATCH /ordens/{id}/aprovar
+        OS->>MQ: CobrarPagamento
+        MQ->>B: CobrarPagamento
+    else cliente reprova
+        C->>OS: PATCH /ordens/{id}/reprovar
+        Note over OS: CANCELADA (nada a desfazer)
+    end
+    alt pagamento confirmado
+        B-->>OS: PagamentoConfirmado
+        Note over OS: APROVADA
+        OS->>MQ: EnfileirarExecucao
+        MQ->>E: EnfileirarExecucao
+    else pagamento recusado
+        B-->>OS: PagamentoRecusado
+        Note over OS: CANCELADA
+    end
+    opt falta peça no estoque
+        E-->>OS: ExecucaoAguardandoItens
+        Note over OS: AGUARDANDO_ITENS
+    end
+    alt reparo executado
+        E-->>OS: ExecucaoIniciada
+        Note over OS: EM_EXECUCAO
+        E-->>OS: ServicoFinalizado (um por serviço)
+        E-->>OS: ExecucaoFinalizada
+        Note over OS: FINALIZADA · Saga CONCLUIDA
+        A->>OS: PATCH /ordens/{id}/entregar
+        Note over OS: ENTREGUE
+    else execução falhou, na fila ou no meio do reparo (compensação)
+        E-->>OS: ExecucaoFalhou
+        OS->>MQ: EstornarPagamento
+        MQ->>B: EstornarPagamento
+        B-->>OS: PagamentoEstornado
+        Note over OS: CANCELADA · Saga COMPENSADA
+    end

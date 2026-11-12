@@ -1,0 +1,32 @@
+flowchart LR
+    atendente(["Atendente da oficina"])
+    cliente(["Cliente"])
+    gw["API Gateway + Lambda<br/>(autenticação por CPF)"]
+
+    subgraph eks["EKS oficina-eks · namespace oficina"]
+        os["<b>OS Service</b><br/>orquestrador da Saga<br/>Spring Boot · HPA 1-3"]
+        mq{{"RabbitMQ<br/>os.eventos · billing.eventos · execucao.eventos<br/>fila oficina-os-eventos + DLQ"}}
+        billing["Billing Service<br/>orçamento · pagamento · estorno"]
+        execucao["Execução Service<br/>estoque · fila · reparo"]
+    end
+
+    pg[("PostgreSQL os_service<br/>OS · histórico · cadastros<br/>outbox · inbox · saga")]
+    dbb[("Banco do Billing")]
+    dbe[("Banco da Execução")]
+    mp["Mercado Pago"]
+    nr["New Relic<br/>APM · traces · eventos da Saga"]
+
+    atendente -->|REST + JWT| gw
+    cliente -->|"REST (token por CPF)"| gw
+    gw --> os
+    os --- pg
+    os -->|"comandos (outbox)"| mq
+    mq -->|eventos| os
+    mq <--> billing
+    mq <--> execucao
+    billing --- dbb
+    billing --- mp
+    execucao --- dbe
+    os -.->|"telemetria e traces"| nr
+    billing -.-> nr
+    execucao -.-> nr

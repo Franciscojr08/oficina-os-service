@@ -1,0 +1,7 @@
+# Namespace compartilhado com a API principal (já existe no cluster; o apply é idempotente)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: oficina
+  labels:
+    app.kubernetes.io/name: oficina

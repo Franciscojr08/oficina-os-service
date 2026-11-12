@@ -1,0 +1,433 @@
+{
+  "name": "Oficina - OS Service e Saga",
+  "description": "Fluxo distribuído da ordem de serviço: Saga (etapas, compensações, duração), mensageria (outbox, DLQ, duplicatas) e traces entre OS Service, Billing e Execução. Antes de importar, troque o accountId 0 pelo id da conta (ver docs/observabilidade/README.md).",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Saga",
+      "description": "Etapas, desfechos e compensações",
+      "widgets": [
+        {
+          "title": "Sagas iniciadas (24 h)",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "FROM SagaOrdemServicoTransicao SELECT count(*) AS 'Sagas' WHERE gatilho = 'SolicitarOrcamento' SINCE 1 day ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Desfecho das Sagas encerradas (7 dias)",
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.pie"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "FROM SagaOrdemServicoTransicao SELECT count(*) WHERE encerrada IS TRUE FACET situacao SINCE 1 week ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Duração média da Saga concluída (min)",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "FROM SagaOrdemServicoTransicao SELECT average(duracaoMs) / 60000 AS 'minutos' WHERE situacao = 'CONCLUIDA' SINCE 1 week ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Transições da Saga por gatilho",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 8,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "FROM SagaOrdemServicoTransicao SELECT count(*) FACET gatilho TIMESERIES SINCE 1 day ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Falhas de compensação (exigem ação manual)",
+          "layout": {
+            "column": 9,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "FROM SagaOrdemServicoTransicao SELECT count(*) AS 'Falhas' WHERE situacao = 'FALHA_COMPENSACAO' SINCE 1 week ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "alertSeverity": "CRITICAL",
+                "value": 1
+              }
+            ]
+          }
+        },
+        {
+          "title": "Compensações por gatilho e motivo",
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "FROM SagaOrdemServicoTransicao SELECT count(*) WHERE situacao IN ('COMPENSANDO', 'COMPENSADA') FACET gatilho, motivo SINCE 1 week ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Comandos reenviados por falta de resposta",
+          "layout": {
+            "column": 7,
+            "row": 7,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "FROM SagaComandoReenviado SELECT count(*) FACET etapa TIMESERIES SINCE 1 day ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Mensageria",
+      "description": "Outbox, consumo idempotente e DLQ",
+      "widgets": [
+        {
+          "title": "Eventos pendentes no outbox",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "FROM Metric SELECT latest(newrelic.timeslice.value) AS 'pendentes' WHERE metricTimesliceName = 'Custom/Mensageria/OutboxPendentes' TIMESERIES SINCE 3 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Mensagens processadas e duplicadas",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "FROM Metric SELECT sum(newrelic.timeslice.value) WHERE metricTimesliceName IN ('Custom/Mensageria/Processadas', 'Custom/Mensageria/Duplicadas') FACET metricTimesliceName TIMESERIES SINCE 1 day ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Mensagens enviadas para a DLQ",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "FROM MensagemRejeitada SELECT count(*) FACET tipo, motivo SINCE 1 week ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Falhas de publicação no broker",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "FROM OutboxFalhaPublicacao SELECT count(*), max(tentativas) FACET tipo SINCE 1 week ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tracing distribuído",
+      "description": "OS passando pelos três serviços",
+      "widgets": [
+        {
+          "title": "Traces que passaram pelos três serviços",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "FROM Span SELECT uniqueCount(entity.name) AS 'serviços', earliest(timestamp) AS 'início' WHERE entity.name IN ('oficina-os-service', 'oficina-billing', 'oficina-execucao') FACET trace.id SINCE 1 day ago LIMIT 50"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Spans por serviço",
+          "layout": {
+            "column": 1,
+            "row": 5,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.area"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "FROM Span SELECT count(*) WHERE entity.name IN ('oficina-os-service', 'oficina-billing', 'oficina-execucao') FACET entity.name TIMESERIES SINCE 1 day ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Mensagens consumidas pelo OS Service (duração p95, ms)",
+          "layout": {
+            "column": 7,
+            "row": 5,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "FROM Transaction SELECT percentile(duration * 1000, 95) WHERE appName = 'oficina-os-service' AND name LIKE 'OtherTransaction/Mensagem/%' FACET name SINCE 1 day ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "API do OS Service: tempo de resposta e erros",
+          "layout": {
+            "column": 1,
+            "row": 8,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "FROM Transaction SELECT average(duration) * 1000 AS 'média (ms)', percentage(count(*), WHERE error IS TRUE) AS '% erro' WHERE appName = 'oficina-os-service' AND transactionType = 'Web' TIMESERIES SINCE 1 day ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ordem de serviço",
+      "description": "Status e etapas da OS",
+      "widgets": [
+        {
+          "title": "Mudanças de status da OS",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 8,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "FROM OrdemServicoStatusAlterado SELECT count(*) FACET statusNovo TIMESERIES SINCE 1 day ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Tempo médio por etapa (min)",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "FROM OrdemServicoEtapaConcluida SELECT average(duracaoMs) / 60000 FACET etapa SINCE 1 week ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Transições inválidas recusadas",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "FROM OrdemServicoTransicaoInvalida SELECT count(*) FACET acao, motivo SINCE 1 week ago"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

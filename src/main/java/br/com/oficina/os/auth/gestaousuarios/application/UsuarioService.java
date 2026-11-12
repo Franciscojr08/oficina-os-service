@@ -1,0 +1,47 @@
+package br.com.oficina.os.auth.gestaousuarios.application;
+
+import static br.com.oficina.os.shared.exception.ExceptionMessage.EXISTING_USER_SAME_EMAIL;
+
+import br.com.oficina.os.auth.gestaousuarios.application.dto.UsuarioRequest;
+import br.com.oficina.os.auth.gestaousuarios.application.dto.UsuarioResponse;
+import br.com.oficina.os.auth.gestaousuarios.application.gateway.UsuarioGateway;
+import br.com.oficina.os.auth.gestaousuarios.domain.Usuario;
+import br.com.oficina.os.shared.exception.RegraNegocioException;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@RequiredArgsConstructor
+public class UsuarioService {
+
+	private final UsuarioGateway usuarioGateway;
+    private final PasswordEncoder passwordEncoder;
+
+    @Transactional
+    public UsuarioResponse criar(UsuarioRequest request) {
+	    if (usuarioGateway.existsByEmail(request.email())) {
+            throw new RegraNegocioException(EXISTING_USER_SAME_EMAIL);
+        }
+
+        Usuario usuario = new Usuario();
+        usuario.setNome(request.nome());
+        usuario.setEmail(request.email());
+        usuario.setSenha(passwordEncoder.encode(request.senha()));
+        usuario.setRole(request.role());
+        usuario.setAtivo(true);
+
+	    Usuario salvo = usuarioGateway.save(usuario);
+
+        return new UsuarioResponse(
+                salvo.getId(),
+                salvo.getNome(),
+                salvo.getEmail(),
+                salvo.getRole(),
+                salvo.getAtivo(),
+                salvo.getDataCriacao(),
+                salvo.getDataAtualizacao()
+        );
+    }
+}

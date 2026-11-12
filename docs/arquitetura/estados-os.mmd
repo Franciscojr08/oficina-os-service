@@ -1,0 +1,19 @@
+stateDiagram-v2
+    [*] --> RECEBIDA: POST /ordens
+    RECEBIDA --> EM_DIAGNOSTICO: iniciar-diagnostico
+    EM_DIAGNOSTICO --> AGUARDANDO_APROVACAO: OrcamentoGerado
+    AGUARDANDO_APROVACAO --> APROVADA: PagamentoConfirmado
+    APROVADA --> AGUARDANDO_ITENS: ExecucaoAguardandoItens
+    APROVADA --> EM_EXECUCAO: ExecucaoIniciada
+    AGUARDANDO_ITENS --> EM_EXECUCAO: ExecucaoIniciada
+    EM_EXECUCAO --> FINALIZADA: ExecucaoFinalizada
+    FINALIZADA --> ENTREGUE: entregar
+    ENTREGUE --> [*]
+
+    RECEBIDA --> CANCELADA: cancelar
+    EM_DIAGNOSTICO --> CANCELADA: cancelar
+    AGUARDANDO_APROVACAO --> CANCELADA: reprovar / PagamentoRecusado / cancelar
+    APROVADA --> CANCELADA: PagamentoEstornado
+    AGUARDANDO_ITENS --> CANCELADA: PagamentoEstornado
+    EM_EXECUCAO --> CANCELADA: PagamentoEstornado apos ExecucaoFalhou
+    CANCELADA --> [*]
