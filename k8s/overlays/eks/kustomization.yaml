@@ -1,0 +1,48 @@
+# Cluster EKS do time (oficina-eks, namespace oficina). Os Secrets os-service-secret e
+# rabbitmq-secret são criados pelo pipeline a partir dos GitHub Secrets (scripts/deploy-k8s.sh).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: oficina
+resources:
+  - namespace.yaml
+  - ../../base
+  - ../../componentes/rabbitmq
+  - newrelic-instrumentation.yaml
+patches:
+  - target:
+      kind: ConfigMap
+      name: os-service-config
+    patch: |-
+      - op: replace
+        path: /data/ENVIRONMENT
+        value: hml
+      # Agent do New Relic (injetado pelo operator): nome da aplicação no APM, tracing distribuído
+      # entre os serviços e logs (JSON, com correlationId) encaminhados com o trace
+      - op: add
+        path: /data/NEW_RELIC_APP_NAME
+        value: oficina-os-service
+      - op: add
+        path: /data/NEW_RELIC_LABELS
+        value: "env:aws-academy;repo:oficina-os-service;servico:os"
+      - op: add
+        path: /data/NEW_RELIC_DISTRIBUTED_TRACING_ENABLED
+        value: "true"
+      - op: add
+        path: /data/NEW_RELIC_APPLICATION_LOGGING_FORWARDING_ENABLED
+        value: "true"
+  - target:
+      kind: Deployment
+      name: os-service
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/annotations
+        value:
+          instrumentation.newrelic.com/inject-java: "true"
+  # Exposto como a API principal: o API Gateway do time encaminha para o Load Balancer
+  - target:
+      kind: Service
+      name: os-service
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: LoadBalancer

@@ -1,0 +1,245 @@
+# CI/CD do OS Service.
+#
+# Pull request para a main: Qualidade (testes, BDD, cobertura, IQC e quality gate do SonarCloud),
+# Imagem (build + Trivy) e Manifestos (kubeconform). Os três são checks obrigatórios da main
+# (scripts/proteger-main.sh).
+# Push na main (merge do PR): roda tudo de novo e, se passar, publica a imagem no ECR e faz o deploy
+# no EKS, com smoke test no Load Balancer.
+#
+# Secrets e variáveis do repositório: README, seção "CI/CD e Kubernetes".
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Em PR, um push novo cancela a verificação antiga; na main, nenhum deploy é interrompido
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME || 'oficina-eks' }}
+  K8S_NAMESPACE: oficina
+  ECR_REPOSITORY: oficina-os-service
+  TRIVY_VERSION: "0.76.2"
+
+jobs:
+  qualidade:
+    name: Qualidade
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Histórico completo: o IQC mede a cobertura das linhas alteradas em relação à main e o
+          # Sonar atribui problemas novos ao PR
+          fetch-depth: 0
+
+      - name: Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      # Testes unitários, de integração (Testcontainers) e BDD, cobertura (JaCoCo, mínimo 80%),
+      # Spotless, Checkstyle, SpotBugs, Trivy e IQC (mínimo 90, sem bloqueadores)
+      - name: Verificação completa (scripts/quality.sh)
+        run: scripts/quality.sh
+
+      - name: IQC no resumo da execução
+        if: always()
+        run: |
+          if [ -f target/quality/iqc.md ]; then
+            cat target/quality/iqc.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "IQC não calculado: a verificação parou antes (ver o log da etapa anterior)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: SonarCloud (quality gate)
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION || 'franciscojr08' }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY || 'Franciscojr08_oficina-os-service' }}
+        run: |
+          if [ -z "${SONAR_TOKEN}" ]; then
+            echo "::error::Secret SONAR_TOKEN não configurado: o quality gate do SonarCloud é obrigatório (ver README)."
+            exit 1
+          fi
+          # Usa as classes e os relatórios de teste e cobertura gerados acima, sem recompilar
+          ./mvnw -B sonar:sonar \
+            -Dsonar.organization="${SONAR_ORGANIZATION}" \
+            -Dsonar.projectKey="${SONAR_PROJECT_KEY}" \
+            -Dsonar.qualitygate.wait=true \
+            -Dsonar.qualitygate.timeout=300
+
+      - name: Relatórios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorios-qualidade
+          retention-days: 14
+          if-no-files-found: ignore
+          path: |
+            target/quality/
+            target/site/jacoco/
+            target/surefire-reports/
+            target/cucumber/
+
+  imagem:
+    name: Imagem
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build da imagem
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: oficina-os-service:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Sistema base + dependências do JAR. Vulnerabilidade HIGH/CRITICAL com correção disponível
+      # barra o PR; sem correção publicada não há o que fazer além de acompanhar.
+      - name: Vulnerabilidades da imagem (Trivy)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            "aquasec/trivy:${TRIVY_VERSION}" image --quiet --scanners vuln \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+            oficina-os-service:ci
+
+  manifestos:
+    name: Manifestos
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Instrumentation é um CRD do New Relic, sem schema no kubeconform: validado pelo próprio cluster
+      - name: Validação dos manifestos (kubeconform)
+        run: |
+          for overlay in eks local; do
+            echo "== overlay ${overlay}"
+            kubectl kustomize "k8s/overlays/${overlay}" \
+              | docker run --rm -i ghcr.io/yannh/kubeconform:v0.7.0 -strict -summary \
+                  -skip Instrumentation -
+          done
+
+      - name: Scripts de deploy
+        run: bash -n scripts/deploy-k8s.sh scripts/k8s-local.sh
+
+  deploy:
+    name: Deploy EKS
+    needs: [qualidade, imagem, manifestos]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: hml
+      url: ${{ steps.smoke.outputs.url }}
+    concurrency:
+      group: deploy-os-service-eks
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # AWS Academy: as credenciais são temporárias e precisam ser atualizadas nos secrets a cada
+      # sessão do Learner Lab
+      - name: Credenciais AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Cluster ativo
+        run: |
+          STATUS=$(aws eks describe-cluster --name "${EKS_CLUSTER_NAME}" --query 'cluster.status' --output text) || {
+            echo "::error::Cluster ${EKS_CLUSTER_NAME} inacessível: confira se o Learner Lab está ativo e os secrets AWS atualizados."
+            exit 1
+          }
+          [ "${STATUS}" = "ACTIVE" ] || { echo "::error::Cluster ${EKS_CLUSTER_NAME} em ${STATUS}, esperado ACTIVE."; exit 1; }
+
+      - name: Login no ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Repositório no ECR
+        run: |
+          aws ecr describe-repositories --repository-names "${ECR_REPOSITORY}" >/dev/null 2>&1 \
+            || aws ecr create-repository --repository-name "${ECR_REPOSITORY}" \
+                 --image-tag-mutability IMMUTABLE \
+                 --image-scanning-configuration scanOnPush=true >/dev/null
+
+      - name: Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Publicação da imagem
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # Tag imutável pelo commit: o que está no cluster é sempre rastreável até o código
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          cache-from: type=gha
+
+      - name: kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Acesso ao cluster
+        run: aws eks update-kubeconfig --region "${AWS_REGION}" --name "${EKS_CLUSTER_NAME}"
+
+      - name: Deploy
+        env:
+          CRIAR_SECRETS: "true"
+          OS_DATASOURCE_URL: ${{ secrets.OS_DATASOURCE_URL }}
+          OS_DATASOURCE_USERNAME: ${{ secrets.OS_DATASOURCE_USERNAME }}
+          OS_DATASOURCE_PASSWORD: ${{ secrets.OS_DATASOURCE_PASSWORD }}
+          SECURITY_JWT_SECRET: ${{ secrets.SECURITY_JWT_SECRET }}
+          RABBITMQ_USERNAME: ${{ secrets.RABBITMQ_USERNAME }}
+          RABBITMQ_PASSWORD: ${{ secrets.RABBITMQ_PASSWORD }}
+        run: |
+          scripts/deploy-k8s.sh eks "${K8S_NAMESPACE}" \
+            "${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:${GITHUB_SHA}"
+
+      - name: Smoke test no Load Balancer
+        id: smoke
+        run: |
+          for i in $(seq 1 60); do
+            DNS=$(kubectl get service os-service -n "${K8S_NAMESPACE}" \
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+            [ -n "${DNS}" ] && break
+            echo "Aguardando o DNS do Load Balancer (${i}/60)"
+            sleep 10
+          done
+          [ -n "${DNS}" ] || { echo "::error::Load Balancer sem DNS"; exit 1; }
+          BASE="http://${DNS}/oficina/v1"
+          curl --fail --show-error --silent --retry 18 --retry-delay 10 --retry-all-errors \
+            "${BASE}/actuator/health/readiness"
+          curl --fail --show-error --silent --output /dev/null "${BASE}/api-docs"
+          echo "url=${BASE}/swagger-ui.html" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Deploy no EKS"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Imagem: \`${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:${GITHUB_SHA}\`"
+            echo "- Swagger: ${BASE}/swagger-ui.html"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,28 @@
+# Build
+target/
+.mvn/wrapper/maven-wrapper.jar
+HELP.md
+
+# IDEs
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.classpath
+.project
+.settings/
+.factorypath
+
+# Segredos e variáveis locais
+.env
+*.env
+!.env.example
+
+# Kubernetes / Terraform
+*kubeconfig*
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+k8s/overlays/.deploy-*

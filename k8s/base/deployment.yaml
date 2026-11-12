@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: os-service
+  labels:
+    app.kubernetes.io/name: os-service
+    app.kubernetes.io/component: api
+spec:
+  # O HPA (hpa.yaml) ajusta as réplicas; várias réplicas são seguras: o outbox usa SKIP LOCKED e o
+  # consumo é idempotente
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Sobe a versão nova antes de derrubar a antiga: o deploy não tira o serviço do ar
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: os-service
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: os-service
+        app.kubernetes.io/component: api
+    spec:
+      automountServiceAccountToken: false
+      # preStop (10 s) + desligamento gracioso do Spring (até 20 s)
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: os-service
+          image: oficina-os-service
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          lifecycle:
+            # Mantém o pod atendendo por alguns segundos depois do sinal de parada, enquanto o
+            # Service e o Load Balancer o tiram da rotação. Sem isso, requisições ainda roteadas
+            # para o pod antigo falham durante o deploy (medido no kind: 3 de 649).
+            preStop:
+              exec:
+                command: ["sleep", "10"]
+          envFrom:
+            - configMapRef:
+                name: os-service-config
+            # Banco, JWT e RabbitMQ: criado pelo pipeline a partir dos GitHub Secrets (nunca versionado)
+            - secretRef:
+                name: os-service-secret
+          # A JVM leva alguns segundos para subir com pouca CPU: a startupProbe segura as outras
+          # até a aplicação responder, sem reiniciar o pod no meio da subida
+          startupProbe:
+            httpGet:
+              path: /oficina/v1/actuator/health/liveness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:
+            httpGet:
+              path: /oficina/v1/actuator/health/liveness
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /oficina/v1/actuator/health/readiness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "768Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            # Raiz somente leitura: o Tomcat e a JVM só escrevem em /tmp
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi

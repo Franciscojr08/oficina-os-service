@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+	Exclusões justificadas. Cada uma é um padrão do framework, não um defeito:
+	- EI_EXPOSE_REP/EI_EXPOSE_REP2: entidades JPA e beans do Spring guardam e expõem referências
+	  por desenho (injeção de dependência, getters/setters do Lombok).
+	- CT_CONSTRUCTOR_THROW: construtores de beans que validam configuração ao subir.
+	- SPRING_ENDPOINT (FindSecBugs): marca todo @RestController como "endpoint"; é informativo.
+	- SPRING_CSRF_PROTECTION_DISABLED só no SecurityConfig: a API é stateless e autentica por
+	  cabeçalho Authorization: Bearer, sem cookie de sessão. Sem credencial enviada automaticamente
+	  pelo navegador, não há vetor de CSRF.
+-->
+<FindBugsFilter>
+	<Match>
+		<Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+	</Match>
+	<Match>
+		<Bug pattern="CT_CONSTRUCTOR_THROW"/>
+	</Match>
+	<Match>
+		<Bug pattern="SPRING_ENDPOINT"/>
+	</Match>
+	<Match>
+		<Class name="br.com.oficina.os.config.SecurityConfig"/>
+		<Bug pattern="SPRING_CSRF_PROTECTION_DISABLED"/>
+	</Match>
+</FindBugsFilter>

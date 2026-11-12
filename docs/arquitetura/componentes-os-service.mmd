@@ -1,0 +1,34 @@
+flowchart TB
+    subgraph entrada["Entrada"]
+        rest["Controllers REST<br/>/ordens · /clientes · /veiculos · /auth · /public"]
+        listener["ConsumidorEventos<br/>fila oficina-os-eventos"]
+    end
+    subgraph app["Aplicação"]
+        ossvc["OrdemServicoService<br/>cadastros e casos de uso"]
+        maquina["OrdemServicoStatusService<br/>máquina de estados + histórico"]
+        saga["OrquestradorSaga<br/>+ VerificadorPrazosSaga"]
+        proc["ProcessadorEventos<br/>inbox (deduplicação)"]
+    end
+    subgraph infra["Infraestrutura"]
+        outbox["OutboxService + OutboxPublicador<br/>publisher confirm · SKIP LOCKED"]
+        repo["Repositórios JPA / JDBC"]
+        tel["Telemetria (New Relic)"]
+    end
+    pg[("PostgreSQL")]
+    mq{{"RabbitMQ"}}
+
+    rest --> ossvc --> maquina
+    ossvc --> saga
+    listener --> proc --> saga --> maquina
+    maquina --> outbox
+    saga --> outbox
+    outbox --> mq
+    mq --> listener
+    maquina --> repo
+    saga --> repo
+    proc --> repo
+    outbox --> repo
+    repo --> pg
+    saga -.-> tel
+    listener -.-> tel
+    outbox -.-> tel

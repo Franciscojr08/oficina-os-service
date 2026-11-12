@@ -1,0 +1,8 @@
+# RabbitMQ no cluster (recomendação da proposta de escopo, sujeita à decisão do time). Se o time
+# adotar um broker gerenciado (Amazon MQ) ou mover o RabbitMQ para o oficina-kubernetes, basta tirar
+# este componente do overlay e apontar SPRING_RABBITMQ_HOST para o broker.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - statefulset.yaml
+  - service.yaml
