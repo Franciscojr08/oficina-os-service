@@ -1,0 +1,58 @@
+erDiagram
+    cliente ||--o{ veiculo : possui
+    cliente ||--o{ ordem_servico : abre
+    veiculo ||--o{ ordem_servico : "é atendido em"
+    ordem_servico ||--o{ historico_ordem_servico : registra
+    ordem_servico ||--o{ item_ordem_servico : usa
+    ordem_servico ||--o{ servico_ordem_servico : inclui
+    ordem_servico ||--o| saga_ordem_servico : "é conduzida por"
+    ordem_servico ||--o{ outbox_evento : "gera eventos"
+
+    ordem_servico {
+        bigint id PK
+        varchar codigo "OS-AAAA-NNNNNN (trigger)"
+        varchar status
+        bigint orcamento_id "id no Billing, sem FK"
+        bigint pagamento_id "id no Billing, sem FK"
+    }
+    item_ordem_servico {
+        bigint id PK
+        bigint item_id "id no catálogo do Billing, sem FK"
+        varchar item_nome "cópia do nome"
+        int quantidade
+    }
+    servico_ordem_servico {
+        bigint id PK
+        bigint servico_id "id no catálogo do Billing, sem FK"
+        varchar servico_nome "cópia do nome"
+    }
+    historico_ordem_servico {
+        bigint id PK
+        varchar status
+        varchar origem "API ou nome do evento"
+        timestamp data_cadastro
+    }
+    saga_ordem_servico {
+        bigint id PK
+        uuid saga_id UK "id do ciclo, vai em toda mensagem"
+        varchar etapa
+        varchar situacao
+        timestamp prazo
+        int tentativas
+        uuid comando_message_id
+    }
+    outbox_evento {
+        bigint id PK
+        uuid message_id UK
+        uuid saga_id "opcional"
+        varchar tipo
+        text payload
+        text rastreamento "traceparent, newrelic"
+        timestamp publicado_em
+    }
+    evento_processado {
+        varchar chave_deduplicacao PK "messageId ou sagaId + hash"
+        uuid message_id "opcional"
+        varchar tipo
+        timestamp processado_em
+    }

@@ -1,0 +1,31 @@
+# Cluster local (kind) para validar os manifestos antes do EKS: inclui PostgreSQL e segredos de
+# desenvolvimento. Uso: scripts/k8s-local.sh
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: oficina-os-local
+resources:
+  - namespace.yaml
+  - postgres.yaml
+  - ../../base
+  - ../../componentes/rabbitmq
+generatorOptions:
+  disableNameSuffixHash: true
+# Valores só de desenvolvimento (os mesmos defaults do docker-compose.yml)
+secretGenerator:
+  - name: os-service-secret
+    literals:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/os_service
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=postgres
+      - SPRING_RABBITMQ_USERNAME=guest
+      - SPRING_RABBITMQ_PASSWORD=guest
+      - SECURITY_JWT_SECRET=jwt-local-secret-123456789012345678901234567890
+  - name: rabbitmq-secret
+    literals:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+  - name: postgres-secret
+    literals:
+      - POSTGRES_DB=os_service
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres

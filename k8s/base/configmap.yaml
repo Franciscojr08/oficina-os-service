@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: os-service-config
+  labels:
+    app.kubernetes.io/name: os-service
+data:
+  # Logs estruturados em JSON (ECS); ENVIRONMENT identifica o ambiente nos logs
+  SPRING_PROFILES_ACTIVE: "docker"
+  ENVIRONMENT: "local"
+  SPRING_RABBITMQ_HOST: "rabbitmq"
+  SPRING_RABBITMQ_PORT: "5672"
+  # O RDS do Learner Lab aceita poucas conexões; cada réplica abre no máximo este número
+  SPRING_DATASOURCE_POOL_SIZE: "3"
+  SECURITY_JWT_EXPIRATION: "7200000"
