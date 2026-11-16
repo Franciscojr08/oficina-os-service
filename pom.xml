@@ -44,6 +44,20 @@
 		<sonar.junit.reportPaths>${project.build.directory}/surefire-reports</sonar.junit.reportPaths>
 		<!-- Mesma exclusão do JaCoCo: a classe de entrada só delega para o SpringApplication.run -->
 		<sonar.coverage.exclusions>**/OficinaOsServiceApplication.java</sonar.coverage.exclusions>
+		<!--
+			Avisos revisados e aceitos, com o motivo registrado aqui (e não só no painel do SonarCloud):
+			- java:S4502 (CSRF desligado): a API é stateless, autenticada por JWT no header Authorization,
+			  sem sessão nem cookie. CSRF só se aplica a credencial enviada automaticamente pelo navegador
+			  (cookie); ligar faria todo POST/PUT/PATCH/DELETE sem token CSRF voltar 403.
+			- githubactions:S5332 (http em texto claro): só no smoke test do pipeline, que chama o Load
+			  Balancer do EKS por dentro para conferir o health. O Load Balancer não tem certificado; o HTTPS
+			  para o cliente é feito pelo API Gateway.
+		-->
+		<sonar.issue.ignore.multicriteria>csrf,smoke</sonar.issue.ignore.multicriteria>
+		<sonar.issue.ignore.multicriteria.csrf.ruleKey>java:S4502</sonar.issue.ignore.multicriteria.csrf.ruleKey>
+		<sonar.issue.ignore.multicriteria.csrf.resourceKey>**/config/SecurityConfig.java</sonar.issue.ignore.multicriteria.csrf.resourceKey>
+		<sonar.issue.ignore.multicriteria.smoke.ruleKey>githubactions:S5332</sonar.issue.ignore.multicriteria.smoke.ruleKey>
+		<sonar.issue.ignore.multicriteria.smoke.resourceKey>.github/workflows/pipeline.yml</sonar.issue.ignore.multicriteria.smoke.resourceKey>
 	</properties>
 
 	<dependencyManagement>
