@@ -29,6 +29,8 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) {
         http
+                // API stateless com JWT no header Authorization, sem sessão nem cookie: não há credencial
+                // que o navegador envie sozinho, então CSRF não se aplica (aviso java:S4502 aceito no pom)
                 .csrf(csrf -> csrf.disable()
                 )
                 .sessionManagement(session ->
